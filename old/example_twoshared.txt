@@ -1,0 +1,151 @@
+#include <Arduino.h>
+#include <freertos/semphr.h> // Include the FreeRTOS semaphore header
+
+TaskHandle_t Task1;
+TaskHandle_t Task2;
+SemaphoreHandle_t sharedMemory1Semaphore;      // Semaphore for sharedMemory1 access
+SemaphoreHandle_t sharedMemory2Semaphore;     // Semaphore for sharedMemory2 access
+
+// Define the size of the shared memory arrays
+const int sharedMemorySize = 1;
+float sharedMemory1[sharedMemorySize];
+float sharedMemory2[sharedMemorySize];
+
+// LED pins
+const int led1 = 2;
+const int led2 = 4;
+
+void Task1code(void *pvParameters);
+void Task2code(void *pvParameters);
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+
+  // Create the semaphore for sharedMemory1 access
+  sharedMemory1Semaphore = xSemaphoreCreateMutex();
+
+  // Check if the semaphore was created successfully
+  if (sharedMemory1Semaphore == NULL) {
+    Serial.println("Semaphore creation failed!");
+    while (1)
+      ; // Stop here if semaphore creation failed
+  }
+
+  // Create the semaphore for sharedMemory2 access
+  sharedMemory2Semaphore = xSemaphoreCreateMutex();
+
+  // Check if the semaphore was created successfully
+  if (sharedMemory2Semaphore == NULL) {
+    Serial.println("Semaphore creation failed!");
+    while (1)
+      ; // Stop here if semaphore creation failed
+  }
+
+  xSemaphoreGive(sharedMemory2Semaphore);      // Allow Task1 to start filling sharedMemory2
+
+  // Create Task1 on core 0
+  xTaskCreatePinnedToCore(
+    Task1code,   /* Task function. */
+    "Task1",     /* name of task. */
+    10000,       /* Stack size of task */
+    NULL,        /* parameter of the task */
+    1,           /* priority of the task */
+    &Task1,      /* Task handle to keep track of created task */
+    0            /* pin task to core 0 */
+  );
+
+  // Create Task2 on core 1
+  xTaskCreatePinnedToCore(
+    Task2code,   /* Task function. */
+    "Task2",     /* name of task. */
+    10000,       /* Stack size of task */
+    NULL,        /* parameter of the task */
+    1,           /* priority of the task */
+    &Task2,      /* Task handle to keep track of created task */
+    1            /* pin task to core 1 */
+  );
+}
+
+void Task1code(void *pvParameters) {
+  Serial.print("Task1 running on core ");
+  Serial.println(xPortGetCoreID());
+
+  for (;;) {
+    // Acquire the semaphore before accessing sharedMemory1
+    if (xSemaphoreTake(sharedMemory1Semaphore, (TickType_t)portMAX_DELAY) == pdTRUE) {
+      // Fill sharedMemory1
+      for (int i = 0; i < sharedMemorySize; i++) {
+        sharedMemory1[i] = 1.0;
+        Serial.print("Task1: sharedMemory1[");
+        Serial.print(i);
+        Serial.print("] = ");
+        Serial.println(sharedMemory1[i]);fflush(stdout);
+      }
+      delay(1100);
+
+      // Release the semaphore after filling sharedMemory1
+      xSemaphoreGive(sharedMemory1Semaphore);
+      vTaskDelay(pdMS_TO_TICKS(1)); // Add a delay to observe the behavior
+    }
+
+    // Acquire the semaphore before accessing sharedMemory2
+    if (xSemaphoreTake(sharedMemory2Semaphore, (TickType_t)portMAX_DELAY) == pdTRUE) {
+      // Fill sharedMemory2
+      for (int i = 0; i < sharedMemorySize; i++) {
+        sharedMemory2[i] = 2.0;
+        Serial.print("Task1: sharedMemory2[");
+        Serial.print(i);
+        Serial.print("] = ");
+        Serial.println(sharedMemory2[i]);fflush(stdout);
+      }
+      delay(1100);
+
+      // Release the semaphore after filling sharedMemory2
+      xSemaphoreGive(sharedMemory2Semaphore);
+    }
+  }
+}
+
+void Task2code(void *pvParameters) {
+  Serial.print("Task2 running on core ");
+  Serial.println(xPortGetCoreID());
+
+  for (;;) {
+    // Acquire the semaphore before accessing sharedMemory1
+    if (xSemaphoreTake(sharedMemory1Semaphore, (TickType_t)portMAX_DELAY) == pdTRUE) {
+      // Process sharedMemory1
+      for (int i = 0; i < sharedMemorySize; i++) {
+        sharedMemory1[i] -= 1.0;
+        Serial.print("Task2: sharedMemory1[");
+        Serial.print(i);
+        Serial.print("] = ");
+        Serial.println(sharedMemory1[i]);fflush(stdout);
+      }
+      delay(1000);
+
+      // Release the semaphore after processing sharedMemory1
+      xSemaphoreGive(sharedMemory1Semaphore);
+      vTaskDelay(pdMS_TO_TICKS(1)); // Add a delay to observe the behavior
+    }
+
+    // Acquire the semaphore before accessing sharedMemory2
+    if (xSemaphoreTake(sharedMemory2Semaphore, (TickType_t)portMAX_DELAY) == pdTRUE) {
+      // Process sharedMemory2
+      for (int i = 0; i < sharedMemorySize; i++) {
+        sharedMemory2[i] -= 2.0;
+        Serial.print("Task2: sharedMemory2[");
+        Serial.print(i);
+        Serial.print("] = ");
+        Serial.println(sharedMemory2[i]);fflush(stdout);
+      }
+      delay(1000);
+
+      // Release the semaphore after processing sharedMemory2
+      xSemaphoreGive(sharedMemory2Semaphore);
+    }
+  }
+}
+
+void loop() {}
